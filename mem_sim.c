@@ -3,28 +3,41 @@
 #include <stdlib.h>
 #include <sys/stat.h> 
 #include <fcntl.h>
+#include <unistd.h>
 #include "mem_sim.h" 
 
-/*****************************
- * SYSTEM:
- * 12 bit system - 12 bit per pointer
- * virtual memory = 2^12 = 4096 bit 
- * 7 msb = page number - 2^7 = 128 pages
- * 5 lsb = offset in page - size of page: 2^5 = 32 bit 
- *****************************/
+/**************************/
+/* Name: Netanel Draiman  */
+/*    ID: 200752152       */
+/*       Home Ex5         */
+/**************************/
 
+/************************************************************/
+/* SYSTEM:                                                  */
+/* 12 bit system - 12 bit per pointer                       */
+/* virtual memory = 2^12 = 4096 bit                         */
+/* 7 msb = page number - 2^7 = 128 pages                    */
+/* 5 lsb = offset in page - size of page: 2^5 = 32 bit      */
+/************************************************************/
+
+//Sizes are in Bytes
 #define SWAP_SIZE 4096
 #define FRAME_SIZE 32
 #define PAGE_SIZE 32
 #define MEMORY_SIZE 512
 
+#define FRAME_NUM MEMORY_SIZE/PAGE_SIZE
+
+/**********************************/
+/********** Data Strcuts **********/
+/**********************************/
 typedef struct page_descriptor {
   unsigned int valid; //valid bit - 1=in main memory, 0=in swapfile\executable
   unsigned int permission; // 0=READ & WRITE, 1=READ ONLY
   unsigned int dirty; // 1=data was written to page, 0=no data was written
   unsigned int frame; // page's frame # in main memory (if valid=1)
   
-  int ref_bit; //reference bit for LRU algorithm
+  //int ref_bit; //reference bit for LRU algorithm
   
 }page_descriptor_t;
 
@@ -36,15 +49,31 @@ struct sim_database {
   int executable_fd; //executable file fd
 };
 
-int bitmap[16];
-
-int numOfPages = SWAP_SIZE/PAGE_SIZE; //128 pages
+/**************************************/
+/********** Global Variables **********/
+/**************************************/
+const int numOfPages = SWAP_SIZE/PAGE_SIZE; //128 pages
+//const int numOfFrames = MEMORY_SIZE/PAGE_SIZE; //16 frames
 int exec_size; // save file size - used to determine beginning of heap\stack in VM
 
-static char* RAM[MEMORY_SIZE]; //each 32 bit is a frame. total: 16 frames
+static char* RAM[MEMORY_SIZE]; //RAM - each 32 Bytes is a frame. total: 16 frames
+int bitmap[FRAME_NUM]; //array to determine if RAM frame is occupied - 1 = occupied, 0 = free.
+int ref_bit[FRAME_NUM]; //LRU algorithm Implementation - reference bit for each frame 
 
 
 
+
+
+/**************************************************/
+/********** Private Methods Declarations **********/
+/**************************************************/
+static void freeDb(sim_database_t*); //free memory
+static int freeFrame(sim_database_t*); //find free frame in RAM
+
+
+/******************************************/
+/********** Main Program Methods **********/
+/******************************************/
 sim_database_t* vm_constructor(char *executable, int text_size, int data_size, int bss_size){
   
   if(executable == NULL)
@@ -83,7 +112,6 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
     db->page_table[i].valid = 0;
     db->page_table[i].dirty = 0;
     db->page_table[i].frame = -1;
-    db->page_table[i].ref_bit = 0;
   }
   
   db->swapfile_name = "swapfile";
@@ -92,6 +120,11 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
     free(db->page_table);
     free(db);
     return NULL;
+  }
+  
+  for(i=0; i < FRAME_NUM; i++) {
+   bitmap[i] = 0;
+   ref_bit[i] = 0;
   }
   
   exec_size = text_size + bss_size + data_size; //assign global variable
@@ -106,23 +139,94 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   page = address >> 5; //shift number 5 bits to get page number
   offset = address & (PAGE_SIZE-1); // mask 5 LSBs to get offset number 
   
+  //Check Address legality
+  if(page >= numOfPages || page < 0) {
+    perror("ERROR: illegal address - page out of range");
+    freeDb(sim_db);
+  }
+  else if(offset >= PAGE_SIZE || offset < 0) {
+   perror("ERROR: illegal address - offset out of range");
+   freeDb(sim_db);
+  }
+  
+  //Find Data:
   //if in RAM
   if (sim_db->page_table[page].valid) { //!= 0 
-    sim_db->page_table[page].ref_bit = 1;
     frame = sim_db->page_table[page].frame;
-    p_char = RAM[frame * PAGE_SIZE + offset];
+    ref_bit[frame] = 1; //frame was referenced, change ref_bit to 1.
+    p_char = RAM[(frame * PAGE_SIZE) + offset];
     return 0;
   }
   
-  //if not in RAM
-  //w00t
+  int bytesRead;
+  
+  //else if in SWAP
+  int swap_loc = lseek(sim_db->swapfile_fd, (page * PAGE_SIZE) + offset, SEEK_SET);
+  if(swap_loc >= 0) { //found location in swap file
+   frame = findFreeFrame(sim_db); //find free frame in RAM, if need be swap a frame out.
+   bytesRead = read(sim_db->swapfile_fd, RAM[frame], 1);
+  }
+  //else in executable
+  else { 
+    int exec_loc = lseek(sim_db->executable_fd, (page * PAGE_SIZE) + offset, SEEK_SET);
+    if(exec_loc < 0)
+      return -1;
+    frame = findFreeFrame(sim_db); //find free frame in RAM, if need be swap a frame out.
+    bytesRead = read(sim_db->executable_fd, RAM[frame], 1);
+  }
+  
+  if(bytesRead != 1)
+    return -1;
+  
+  if(bitmap[frame] || ref_bit[frame]) {
+     perror("ERROR: frame suppose to be free (bitmap = 0) with ref_bit = 0!");
+     return -1;
+    }
+  
+  p_char = RAM[frame];
+  bitmap[frame] = 1;
+  ref_bit[frame] = 1;
+  
+  sim_db->page_table[page].frame = frame;
+  sim_db->page_table[page].valid = 1;
+    
+  
+  /*** Issues ***/
+  /*
+   * how do i check if a memory cell is in heap or stack? --needed to check if heap address was initialized
+   * how do i assign memory for heap & stack? --in ctor
+   */
   
   
   
   
-  
-  
+  return 0;
 }
 
+
+/****************************************************/
+/********** Private Methods Implementation **********/
+/****************************************************/
+
+//Free Memory Method - (used outside of ctor)
+static void freeDb(sim_database_t *db) {
+  free(db->page_table);
+  free(db);
+}
+
+//Finds free Frame in RAM or frees an old one
+static int freeFrame(sim_database_t *db) {
+  int i, frame = 0;
+  //find frame with ref_bit = 0, if ref_bit = 1 - change to 0 to replace next time;
+  for(i=0; i < MEMORY_SIZE; i+=PAGE_SIZE) {
+    if(!ref_bit[i/PAGE_SIZE]) {
+      frame = i/PAGE_SIZE;
+      break;
+    }
+    else
+      ref_bit[i/PAGE_SIZE] = 0;
+  }
+  return frame;
+}
 
 
