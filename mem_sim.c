@@ -114,6 +114,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
     return 0;
   }
   
+  //if not in RAM
   
   
   
