@@ -61,6 +61,12 @@ int bitmap[FRAME_NUM]; //array to determine if RAM frame is occupied - 1 = occup
 int ref_bit[FRAME_NUM]; //LRU algorithm Implementation - reference bit for each frame 
 
 
+//VM Tracking Variables
+int memory_access=0;
+int hits = 0;
+int miss = 0;
+int illegal_addr = 0;
+int read_only_err = 0;
 
 
 
