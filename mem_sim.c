@@ -127,7 +127,7 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
    ref_bit[i] = 0;
   }
   
-  exec_size = text_size + bss_size + data_size; //assign global variable
+  exec_size = text_size + bss_size + data_size; //assign global variable - size in pages
   
   return db;
 }
@@ -141,12 +141,12 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   
   //Check Address legality
   if(page >= numOfPages || page < 0) {
-    perror("ERROR: illegal address - page out of range");
-    freeDb(sim_db);
+    perror("ERROR: illegal address - page out of range\n");
+    return -1;
   }
   else if(offset >= PAGE_SIZE || offset < 0) {
-   perror("ERROR: illegal address - offset out of range");
-   freeDb(sim_db);
+   perror("ERROR: illegal address - offset out of range\n");
+   return -1;
   }
   
   //Find Data:
@@ -158,37 +158,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
     return 0;
   }
   
-  int bytesRead;
   
-  //else if in SWAP
-  int swap_loc = lseek(sim_db->swapfile_fd, (page * PAGE_SIZE) + offset, SEEK_SET);
-  if(swap_loc >= 0) { //found location in swap file
-   frame = findFreeFrame(sim_db); //find free frame in RAM, if need be swap a frame out.
-   bytesRead = read(sim_db->swapfile_fd, RAM[frame], 1);
-  }
-  //else in executable
-  else { 
-    int exec_loc = lseek(sim_db->executable_fd, (page * PAGE_SIZE) + offset, SEEK_SET);
-    if(exec_loc < 0)
-      return -1;
-    frame = findFreeFrame(sim_db); //find free frame in RAM, if need be swap a frame out.
-    bytesRead = read(sim_db->executable_fd, RAM[frame], 1);
-  }
-  
-  if(bytesRead != 1)
-    return -1;
-  
-  if(bitmap[frame] || ref_bit[frame]) {
-     perror("ERROR: frame suppose to be free (bitmap = 0) with ref_bit = 0!");
-     return -1;
-    }
-  
-  p_char = RAM[frame];
-  bitmap[frame] = 1;
-  ref_bit[frame] = 1;
-  
-  sim_db->page_table[page].frame = frame;
-  sim_db->page_table[page].valid = 1;
     
   
   /*** Issues ***/
@@ -203,6 +173,17 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   return 0;
 }
 
+int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value) {
+ return -1; 
+}
+
+void vm_destructor(sim_database_t *sim_db) {
+  
+}
+
+void vm_print(sim_database_t* sim_db) {
+  freeDb(sim_db);
+}
 
 /****************************************************/
 /********** Private Methods Implementation **********/
@@ -215,18 +196,37 @@ static void freeDb(sim_database_t *db) {
 }
 
 //Finds free Frame in RAM or frees an old one
+//return value: on sucess - frame #, on failure returns -1
 static int freeFrame(sim_database_t *db) {
   int i, frame = 0;
+  
+  //search for free Frame in RAM
+  for(i=0; i < FRAME_NUM; i++) {
+   if(!bitmap[i]) 
+     return i;
+  }
+  
+  //RAM is full
   //find frame with ref_bit = 0, if ref_bit = 1 - change to 0 to replace next time;
-  for(i=0; i < MEMORY_SIZE; i+=PAGE_SIZE) {
-    if(!ref_bit[i/PAGE_SIZE]) {
-      frame = i/PAGE_SIZE;
+  for(i=0; i < FRAME_NUM; i++) {
+    if(!ref_bit[i]) {
+      frame = i;
       break;
     }
     else
       ref_bit[i/PAGE_SIZE] = 0;
   }
+  if(db->page_table[frame].dirty) {
+    int swap_loc = lseek(db->swapfile_fd, (frame * PAGE_SIZE), SEEK_SET);
+    if(swap_loc < 0)
+      return -1;
+    int bytesWritten = write(db->swapfile_fd, RAM[frame], PAGE_SIZE);
+    if(bytesWritten < 0)
+      return -1;
+    db->page_table[frame].dirty = 0;
+  }
   return frame;
 }
+
 
 
