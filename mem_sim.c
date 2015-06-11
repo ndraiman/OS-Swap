@@ -38,6 +38,8 @@ typedef struct page_descriptor {
   unsigned int frame; // page's frame # in main memory (if valid=1)
   
   //int ref_bit; //reference bit for LRU algorithm
+  unsigned int lru_counter;
+  unsigned int allocated; //-1=exec, 0=not, 1=yes, used for heap\stack
   
 }page_descriptor_t;
 
@@ -58,7 +60,7 @@ int exec_size; // save file size - used to determine beginning of heap\stack in 
 
 static char* RAM[MEMORY_SIZE]; //RAM - each 32 Bytes is a frame. total: 16 frames
 int bitmap[FRAME_NUM]; //array to determine if RAM frame is occupied - 1 = occupied, 0 = free.
-int ref_bit[FRAME_NUM]; //LRU algorithm Implementation - reference bit for each frame 
+//int ref_bit[FRAME_NUM]; //LRU algorithm Implementation - reference bit for each frame
 
 char* temp_page[PAGE_SIZE]; //temp page for swapping
 
@@ -132,14 +134,20 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
   
   int i;
   for(i=0; i < numOfPages; i++) {
-    if(i < text_size)
+    if(i < text_size) {
       db->page_table[i].permission = 1; //READ ONLY
-    else
+      db->page_table[i].allocated = -1;
+    }
+    else {
       db->page_table[i].permission = 0; //READ & WRITE
+      db->page_table[i].allocated = 0;
+    }
       
     db->page_table[i].valid = 0;
     db->page_table[i].dirty = 0;
     db->page_table[i].frame = -1;
+    
+    db->page_table[i].lru_counter = 0;
   }
   
   db->swapfile_name = "swapfile";
@@ -150,10 +158,8 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
     return NULL;
   }
   
-  for(i=0; i < FRAME_NUM; i++) {
+  for(i=0; i < FRAME_NUM; i++)
    bitmap[i] = 0;
-   ref_bit[i] = 0;
-  }
   
   exec_size = text_size + bss_size + data_size; //assign global variable - size in pages
   
@@ -164,8 +170,8 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
 
 int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_char) {
   int page, offset, frame;
-  page = address >> 5; //shift number 5 bits to get page number
-  offset = address & (PAGE_SIZE-1); // mask 5 LSBs to get offset number 
+  page = (address >> 5); //shift number 5 bits to get page number
+  offset = (address & (PAGE_SIZE-1)); // mask 5 LSBs to get offset number 
   
   //Check Address legality
   if(page >= numOfPages || page < 0) {
@@ -181,7 +187,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   //if in RAM
   if (sim_db->page_table[page].valid) { //!= 0 
     frame = sim_db->page_table[page].frame;
-    ref_bit[frame] = 1; //frame was referenced, change ref_bit to 1.
+    //ref_bit[frame] = 1; //frame was referenced, change ref_bit to 1.
     p_char = RAM[(frame * PAGE_SIZE) + offset];
     return 0;
   }
@@ -228,26 +234,6 @@ static int freeFrame(sim_database_t *db) {
      return i;
   }
   
-  //RAM is full
-  //find frame with ref_bit = 0, if ref_bit = 1 - change to 0 to replace next time;
-  for(i=0; i < FRAME_NUM; i++) {
-    if(!ref_bit[i]) {
-      frame = i;
-      break;
-    }
-    else
-      ref_bit[i/PAGE_SIZE] = 0;
-  }
-  if(db->page_table[frame].dirty) {
-    int swap_loc = lseek(db->swapfile_fd, (frame * PAGE_SIZE), SEEK_SET);
-    if(swap_loc < 0)
-      return -1;
-    int bytesWritten = write(db->swapfile_fd, RAM[frame], PAGE_SIZE);
-    if(bytesWritten < 0)
-      return -1;
-    db->page_table[frame].dirty = 0;
-  }
-  return frame;
 }
 
 
