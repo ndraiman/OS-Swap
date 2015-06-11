@@ -89,7 +89,7 @@ Valid = 0 & Dirty = 1 - page in SWAP
 Valid = 0 & Dirty = 0 - page in DISK (EXEC)
 
 
-
+LRU - counter Implementation - save counter for each page
 */
 
 /**************************************************/
