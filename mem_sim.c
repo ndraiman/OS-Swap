@@ -60,6 +60,7 @@ static char* RAM[MEMORY_SIZE]; //RAM - each 32 Bytes is a frame. total: 16 frame
 int bitmap[FRAME_NUM]; //array to determine if RAM frame is occupied - 1 = occupied, 0 = free.
 int ref_bit[FRAME_NUM]; //LRU algorithm Implementation - reference bit for each frame 
 
+char* temp_page[PAGE_SIZE]; //temp page for swapping
 
 //VM Tracking Variables
 int memory_access=0;
@@ -68,7 +69,28 @@ int miss = 0;
 int illegal_addr = 0;
 int read_only_err = 0;
 
+/************************************************** 
+Instructions:
 
+in the exercise DISK refers to the Executable
+any address that isnt part of Executable is part of the Stack\Heap
+
+new page for Stack\Heap needs to be a new page filled with 32 zeros (use temp page)
+
+if any change occured dirty=1 - will always remain as 1 !!!!
+if dirty=1 it means we have to load the page from the SWAP! 
+and not from exec
+for example - pages loaded from DATA\BSS sections of exec that were changed 
+will be saved to the SWAP
+
+Determine Page Location:
+Valid = 1 - page in RAM
+Valid = 0 & Dirty = 1 - page in SWAP
+Valid = 0 & Dirty = 0 - page in DISK (EXEC)
+
+
+
+*/
 
 /**************************************************/
 /********** Private Methods Declarations **********/
@@ -165,13 +187,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   }
   
   
-    
   
-  /*** Issues ***/
-  /*
-   * how do i check if a memory cell is in heap or stack? --needed to check if heap address was initialized
-   * how do i assign memory for heap & stack? --in ctor
-   */
   
   
   
