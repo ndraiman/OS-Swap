@@ -4,6 +4,7 @@
 #include <sys/stat.h> 
 #include <fcntl.h>
 #include <unistd.h>
+#include <limits.h>
 #include "mem_sim.h" 
 
 /**************************/
@@ -26,7 +27,7 @@
 #define PAGE_SIZE 32
 #define MEMORY_SIZE 512
 
-#define FRAME_NUM MEMORY_SIZE/PAGE_SIZE
+#define FRAME_NUM MEMORY_SIZE/PAGE_SIZE //16 frames
 
 /**********************************/
 /********** Data Strcuts **********/
@@ -38,8 +39,7 @@ typedef struct page_descriptor {
   unsigned int frame; // page's frame # in main memory (if valid=1)
   
   //int ref_bit; //reference bit for LRU algorithm
-  unsigned int lru_counter;
-  unsigned int allocated; //-1=exec, 0=not, 1=yes, used for heap\stack
+  unsigned int allocated; //-1=text segment of exec, 0=not, 1=yes, used for heap\stack
   
 }page_descriptor_t;
 
@@ -55,21 +55,23 @@ struct sim_database {
 /********** Global Variables **********/
 /**************************************/
 const int numOfPages = SWAP_SIZE/PAGE_SIZE; //128 pages
-//const int numOfFrames = MEMORY_SIZE/PAGE_SIZE; //16 frames
 int exec_size; // save file size - used to determine beginning of heap\stack in VM
 
 static char* RAM[MEMORY_SIZE]; //RAM - each 32 Bytes is a frame. total: 16 frames
 int bitmap[FRAME_NUM]; //array to determine if RAM frame is occupied - 1 = occupied, 0 = free.
-//int ref_bit[FRAME_NUM]; //LRU algorithm Implementation - reference bit for each frame
+int lru[FRAME_NUM]; //holds global counter for each page loaded in RAM
+int lru_page[FRAME_NUM]; //holds page number for each page loaded in LRU
 
 char* temp_page[PAGE_SIZE]; //temp page for swapping
 
+int global_counter=0; //used for LRU
+
 //VM Tracking Variables
-int memory_access=0;
-int hits = 0;
-int miss = 0;
-int illegal_addr = 0;
-int read_only_err = 0;
+int count_memoryAccess=0; //# of times vmload  & vmstore got called
+int count_hits = 0; //# of access to pages already in memory
+int count_miss = 0; //# of pagefaults - access to pages no in memory
+int count_illegalAddr = 0; //# of illegal addresses
+int count_read_only_err = 0; //# of writing attempts to a read-only section
 
 /************************************************** 
 Instructions:
@@ -147,7 +149,6 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
     db->page_table[i].dirty = 0;
     db->page_table[i].frame = -1;
     
-    db->page_table[i].lru_counter = 0;
   }
   
   db->swapfile_name = "swapfile";
@@ -158,8 +159,10 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
     return NULL;
   }
   
-  for(i=0; i < FRAME_NUM; i++)
-   bitmap[i] = 0;
+  for(i=0; i < FRAME_NUM; i++) {
+    bitmap[i] = 0;
+    lru[i] = 0;
+  }
   
   exec_size = text_size + bss_size + data_size; //assign global variable - size in pages
   
@@ -173,31 +176,72 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   page = (address >> 5); //shift number 5 bits to get page number
   offset = (address & (PAGE_SIZE-1)); // mask 5 LSBs to get offset number 
   
+  //update counters
+  count_memoryAccess++;
+  global_counter++;
+  
+  //fprintf(stderr, "address = %d ,page = %d, numOfPages = %d \n", address, page, numOfPages); //debug
+  
   //Check Address legality
   if(page >= numOfPages || page < 0) {
     perror("ERROR: illegal address - page out of range\n");
+    count_illegalAddr++;
     return -1;
   }
   else if(offset >= PAGE_SIZE || offset < 0) {
    perror("ERROR: illegal address - offset out of range\n");
+   count_illegalAddr++;
    return -1;
   }
   
-  //Find Data:
+  int bytes;
+  
+  /********** Find Page **********/
+  
   //if in RAM
   if (sim_db->page_table[page].valid) { //!= 0 
     frame = sim_db->page_table[page].frame;
-    //ref_bit[frame] = 1; //frame was referenced, change ref_bit to 1.
+    lru[frame] = global_counter;
     p_char = RAM[(frame * PAGE_SIZE) + offset];
+    count_hits++;
     return 0;
   }
+  //if in  SWAP
+  else if (sim_db->page_table[page].dirty) {
+    bytes = lseek(sim_db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET);
+    if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
+      perror("ERROR: vmload failed to access SWAP file\n");
+      return -1;
+    }
+    frame = freeFrame(sim_db);
+    if(frame < 0)
+      return -1;
+    
+    bytes = read(sim_db->swapfile_fd, RAM[frame], FRAME_SIZE);
+    if(bytes < 0 || bytes != FRAME_SIZE) {
+      perror("ERROR: failed to read from SWAP file\n");
+      return -1;
+    }
+  }
+  //else in executable
+  else {
+    bytes = lseek(sim_db->executable_fd, (page * PAGE_SIZE), SEEK_SET);
+    if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
+      perror("ERROR: vmload failed to access SWAP file\n");
+      return -1;
+    }
+    frame = freeFrame(sim_db);
+    if(frame < 0)
+      return -1;
+    
+    bytes = read(sim_db->executable_fd, RAM[frame], FRAME_SIZE);
+    if(bytes < 0 || bytes != FRAME_SIZE) {
+      perror("ERROR: failed to read from SWAP file\n");
+      return -1;
+    }
+  }
   
-  
-  
-  
-  
-  
-  
+  count_miss++;
   return 0;
 }
 
@@ -226,14 +270,41 @@ static void freeDb(sim_database_t *db) {
 //Finds free Frame in RAM or frees an old one
 //return value: on sucess - frame #, on failure returns -1
 static int freeFrame(sim_database_t *db) {
-  int i, frame = 0;
+  int i, page = 0, frame = 0;
+  int min = INT_MAX, min_lru;
+  int bytes;
   
   //search for free Frame in RAM
   for(i=0; i < FRAME_NUM; i++) {
-   if(!bitmap[i]) 
-     return i;
+    if(!bitmap[i]) 
+      return i;
+    if(min > lru[i]) {
+      min = lru[i];
+      min_lru = i;
+    } 
+  }
+
+  //if reached here, means we have to SWAP-OUT frame at min_lru_index
+  page = lru_page[min_lru];
+  frame = db->page_table[page].frame;
+  
+  //page is READ-ONLY, no need to write into SWAP.
+  if(db->page_table[page].permission)
+    return frame;
+  
+  //Write page into SWAP
+  bytes = lseek(db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET);
+  if(bytes < 0 || bytes != FRAME_SIZE) {
+    perror("ERROR: failed to swapout frame into SWAP file\n");
+    return -1;
+  }
+  bytes = write(db->swapfile_fd, RAM[frame], FRAME_SIZE);
+  if(bytes < 0 || bytes != FRAME_SIZE) {
+    perror("ERROR: failed to swapout frame into SWAP file\n");
+    return -1;
   }
   
+  return frame;
 }
 
 
