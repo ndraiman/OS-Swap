@@ -3,7 +3,7 @@ CFLAGS = -c
 OBJECTS = mem_sim.o main.o
 
 app: $(OBJECTS)
-	$(CC) $(OBJECTS) -o app
+	$(CC) $(OBJECTS) -Wall -o app
 	
 clean:
 	rm $(OBJECTS)

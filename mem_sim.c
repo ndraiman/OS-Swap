@@ -62,11 +62,11 @@ int bitmap[FRAME_NUM]; //array to determine if RAM frame is occupied - 1 = occup
 int lru[FRAME_NUM]; //holds global counter for each page loaded in RAM
 int lru_page[FRAME_NUM]; //holds page number for each page loaded in LRU
 
-char* temp_page[PAGE_SIZE]; //temp page for swapping
+char* temp_page; //temp page for swapping
 
 int global_counter=0; //used for LRU
 
-//VM Tracking Variables
+//Statistics Variables
 int count_memoryAccess=0; //# of times vmload  & vmstore got called
 int count_hits = 0; //# of access to pages already in memory
 int count_miss = 0; //# of pagefaults - access to pages no in memory
@@ -101,7 +101,7 @@ LRU - counter Implementation - save counter for each page
 /**************************************************/
 static void freeDb(sim_database_t*); //free memory
 static int freeFrame(sim_database_t*); //find free frame in RAM
-
+static void init_tempPage(); //initialize temp page to PAGE_SIZE zeroes (32)
 
 /******************************************/
 /********** Main Program Methods **********/
@@ -124,10 +124,18 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
     return NULL;
   }
   
+  temp_page = (char*)malloc(sizeof(char)*PAGE_SIZE);
+  if(temp_page = NULL) {
+    perror("ERROR: failed to allocate memory for temp_page\n");
+    free(db->page_table);
+    free(db);
+    return NULL;
+  }
   
   db->executable_name = executable;
   if( (db->executable_fd = open(db->executable_name, O_RDONLY, 0777)) < 0) {
     perror("ERROR: failed to open executable\n");
+    free(temp_page);
     free(db->page_table);
     free(db);
     return NULL;
@@ -154,6 +162,7 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
   db->swapfile_name = "swapfile";
   if( (db->swapfile_fd = open(db->swapfile_name, O_RDWR | O_CREAT, 0777)) < 0) {
     perror("ERROR: failed to create swap file\n");
+    free(temp_page);
     free(db->page_table);
     free(db);
     return NULL;
@@ -241,20 +250,70 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
     }
   }
   
+  sim_db->page_table[page].frame = frame;
   count_miss++;
   return 0;
 }
 
 int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value) {
- return -1; 
+  int page, offset, frame;
+  page = (address >> 5); //shift number 5 bits to get page number
+  offset = (address & (PAGE_SIZE-1)); // mask 5 LSBs to get offset number 
+  
+  //update counters
+  count_memoryAccess++;
+  global_counter++;
+  
+  //Check Address legality
+  if(page >= numOfPages || page < 0) {
+    perror("ERROR: illegal address - page out of range\n");
+    count_illegalAddr++;
+    return -1;
+  }
+  else if(offset >= PAGE_SIZE || offset < 0) {
+   perror("ERROR: illegal address - offset out of range\n");
+   count_illegalAddr++;
+   return -1;
+  }
+  //check if address is part of exec text segement - read-only
+  else if(sim_db->page_table[page].permission) {
+    perror("ERROR: trying to write onto a read-only address\n");
+    count_read_only_err++;
+    return -1;
+  }
+  
+  if(sim_db->page_table[page].valid) {
+    frame = sim_db->page_table[page].frame;
+    lru[frame] = global_counter;
+    sim_db->page_table[page].dirty = 1;
+    RAM[frame + offset] = value; //correct position?
+    count_hits++;
+    return 0;
+  }
+  
+  /*** Issues ***/
+  // char* RAM[MEMORY_SIZE] OR char RAM[MEMORY_SIZE]??? is RAM char* or char**
+  // if char*, how do i assign "value" to it?
+  // if char, how do i use read(), write() functions? do i use tmep_page?
+  /**************/
+  
+  /*** Possible Solution ***/
+  // turn RAM to char*
+  // use temp_page and strncpy to copy from read()\write() to RAM.
+  /*************************/
+  
+  return -1; 
 }
 
 void vm_destructor(sim_database_t *sim_db) {
-  
+  freeDb(sim_db);
 }
 
 void vm_print(sim_database_t* sim_db) {
-  freeDb(sim_db);
+  //print d.s.?? whats that?
+  //statistics = counters? hits\miss etc
+  
+  //printf("%s \n", RAM);
 }
 
 /****************************************************/
@@ -263,6 +322,7 @@ void vm_print(sim_database_t* sim_db) {
 
 //Free Memory Method - (used outside of ctor)
 static void freeDb(sim_database_t *db) {
+  free(temp_page);
   free(db->page_table);
   free(db);
 }
@@ -307,5 +367,12 @@ static int freeFrame(sim_database_t *db) {
   return frame;
 }
 
+//initialize temp page to PAGE_SIZE zeroes (32)
+static void init_tempPage() {
+  int i;
+  for(i=0; i < PAGE_SIZE; i++) {
+    temp_page[i] = '0';
+  }
+}
 
 
