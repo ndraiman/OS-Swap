@@ -38,9 +38,6 @@ typedef struct page_descriptor {
   unsigned int dirty; // 1=data was written to page, 0=no data was written
   unsigned int frame; // page's frame # in main memory (if valid=1)
   
-  //int ref_bit; //reference bit for LRU algorithm
-  unsigned int allocated; //-1=text segment of exec, 0=not, 1=yes, used for heap\stack
-  
 }page_descriptor_t;
 
 struct sim_database {
@@ -57,12 +54,12 @@ struct sim_database {
 const int numOfPages = SWAP_SIZE/PAGE_SIZE; //128 pages
 int exec_size; // save file size - used to determine beginning of heap\stack in VM
 
-static char* RAM[MEMORY_SIZE]; //RAM - each 32 Bytes is a frame. total: 16 frames
+static char RAM[MEMORY_SIZE]; //RAM - each 32 Bytes is a frame. total: 16 frames
 int bitmap[FRAME_NUM]; //array to determine if RAM frame is occupied - 1 = occupied, 0 = free.
 int lru[FRAME_NUM]; //holds global counter for each page loaded in RAM
 int lru_page[FRAME_NUM]; //holds page number for each page loaded in LRU
 
-char* temp_page; //temp page for swapping
+char temp_page[PAGE_SIZE]; //temp page for swapping
 
 int global_counter=0; //used for LRU
 
@@ -124,18 +121,9 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
     return NULL;
   }
   
-  temp_page = (char*)malloc(sizeof(char)*PAGE_SIZE);
-  if(temp_page = NULL) {
-    perror("ERROR: failed to allocate memory for temp_page\n");
-    free(db->page_table);
-    free(db);
-    return NULL;
-  }
-  
   db->executable_name = executable;
   if( (db->executable_fd = open(db->executable_name, O_RDONLY, 0777)) < 0) {
     perror("ERROR: failed to open executable\n");
-    free(temp_page);
     free(db->page_table);
     free(db);
     return NULL;
@@ -144,14 +132,10 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
   
   int i;
   for(i=0; i < numOfPages; i++) {
-    if(i < text_size) {
+    if(i < text_size)
       db->page_table[i].permission = 1; //READ ONLY
-      db->page_table[i].allocated = -1;
-    }
-    else {
+    else
       db->page_table[i].permission = 0; //READ & WRITE
-      db->page_table[i].allocated = 0;
-    }
       
     db->page_table[i].valid = 0;
     db->page_table[i].dirty = 0;
@@ -162,7 +146,6 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
   db->swapfile_name = "swapfile";
   if( (db->swapfile_fd = open(db->swapfile_name, O_RDWR | O_CREAT, 0777)) < 0) {
     perror("ERROR: failed to create swap file\n");
-    free(temp_page);
     free(db->page_table);
     free(db);
     return NULL;
@@ -211,7 +194,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   if (sim_db->page_table[page].valid) { //!= 0 
     frame = sim_db->page_table[page].frame;
     lru[frame] = global_counter;
-    p_char = RAM[(frame * PAGE_SIZE) + offset];
+    p_char = &RAM[(frame * PAGE_SIZE) + offset];
     count_hits++;
     return 0;
   }
@@ -226,7 +209,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
     if(frame < 0)
       return -1;
     
-    bytes = read(sim_db->swapfile_fd, RAM[frame], FRAME_SIZE);
+    bytes = read(sim_db->swapfile_fd, &RAM[frame], FRAME_SIZE);
     if(bytes < 0 || bytes != FRAME_SIZE) {
       perror("ERROR: failed to read from SWAP file\n");
       return -1;
@@ -243,7 +226,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
     if(frame < 0)
       return -1;
     
-    bytes = read(sim_db->executable_fd, RAM[frame], FRAME_SIZE);
+    bytes = read(sim_db->executable_fd, &RAM[frame], FRAME_SIZE);
     if(bytes < 0 || bytes != FRAME_SIZE) {
       perror("ERROR: failed to read from SWAP file\n");
       return -1;
@@ -291,15 +274,10 @@ int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value
     return 0;
   }
   
-  /*** Issues ***/
-  // char* RAM[MEMORY_SIZE] OR char RAM[MEMORY_SIZE]??? is RAM char* or char**
-  // if char*, how do i assign "value" to it?
-  // if char, how do i use read(), write() functions? do i use tmep_page?
-  /**************/
   
-  /*** Possible Solution ***/
-  // turn RAM to char*
-  // use temp_page and strncpy to copy from read()\write() to RAM.
+  /*** Solution ***/
+  // RAM is char* - static char RAM[MEMORY_SIZE];
+  // used &RAM[frame] to read()\write() from\to SWAP
   /*************************/
   
   return -1; 
@@ -322,7 +300,6 @@ void vm_print(sim_database_t* sim_db) {
 
 //Free Memory Method - (used outside of ctor)
 static void freeDb(sim_database_t *db) {
-  free(temp_page);
   free(db->page_table);
   free(db);
 }
@@ -358,7 +335,7 @@ static int freeFrame(sim_database_t *db) {
     perror("ERROR: failed to swapout frame into SWAP file\n");
     return -1;
   }
-  bytes = write(db->swapfile_fd, RAM[frame], FRAME_SIZE);
+  bytes = write(db->swapfile_fd, &RAM[frame], FRAME_SIZE);
   if(bytes < 0 || bytes != FRAME_SIZE) {
     perror("ERROR: failed to swapout frame into SWAP file\n");
     return -1;
