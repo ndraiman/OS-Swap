@@ -1,0 +1,17 @@
+//Notes for Home Exercise 5
+
+exec's text_segment isnt saved in SWAP file
+
+text_segment permission = 1
+for everything else persmission = 0
+
+if valid = 1 - hit! - page in memory
+if valid = 0 - miss!:
+	permission = 1? - copy page from exec
+	permission = 0?:
+		page in swap?: no - dirty = 0 - for vm_store: init new page, for vm_load: error.
+			       yes - dirty = 1 - bring in page from swap
+
+BSS\DATA - bring page from Exec - check if permission = 0 and address is in Exec range of addresses
+
+there shouldnt be any malloc in this exercise - for temp_page
