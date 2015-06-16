@@ -1,9 +1,7 @@
 /******************************************************************************
-
     File : main.c
 
     Description : testing the vm module 
-
 ******************************************************************************/
 
 #include <stdio.h>
@@ -19,7 +17,6 @@
 #define ACCESS 2000
 #define MISS -1
 #define HIT 0
-#define VM_FRAME_SIZE 32
 /******************************************************************************
     Function main :
 ******************************************************************************/
@@ -37,31 +34,11 @@ int main ()
   /* random number generator */
   scanf ( "%d %d %d %d" , &seed, &text, &data, &bss ) ;
   srand ( seed )         ;
-
-  /* open the file for writing */
-  if ( ( fd = open ( file , O_RDWR | O_TRUNC | O_CREAT , 0777 ) ) < 0 )
-    {
-      perror ( "Error: open" ) ;
-      exit ( EXIT_FAILURE ) ;
-    }
-
-  /* writing to the file */
-  for ( counter = 0 ; counter < VM_FRAME_SIZE * ( text + data + bss ) ; counter++ )
-    {
-      /* only digits are witten to the file */
-      value = ( rand () % 10 ) + 48 ; 
-      if ( ( write ( fd, &value, 1 ) < 0 ) )
-	{
-	  perror ( "Error: write" ) ;
-	  exit ( EXIT_FAILURE  ) ;
-	}
-    }
-
-  close ( fd ) ;
-
+      
   /* initiating the virtual memory */
   vir_mem = vm_constructor( file, text, data, bss  ) ;
-  
+  vm_print(vir_mem);
+
   for ( counter = 0 ; counter < ACCESS  ; counter++ )
     {
       int s ; 
@@ -77,6 +54,8 @@ int main ()
       else if ( s == HIT )
 	hit++ ;
     }
+
+  vm_print(vir_mem);
 
   vm_destructor ( vir_mem ) ;
   
