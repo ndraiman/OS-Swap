@@ -11,6 +11,6 @@ clean:
 mem_sim.o: mem_sim.c mem_sim.h
 	$(CC) $(CFLAGS) mem_sim.c mem_sim.h
 
-main.o: main.c
-	$(CC) $(CFLAGS) main.c
+main.o: MAIN.c
+	$(CC) $(CFLAGS) MAIN.c
 
