@@ -1,0 +1,9 @@
+HomeEx5 Issues:
+
+RAM doesnt Write properly after first time
+found the problem:
+
+in main, value is declared as follows:   unsigned char value = 4;
+instead of:   unsigned char value = '4';
+
+is this intended? or an error by Assaf?

@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -c
-OBJECTS = mem_sim.o main.o
+OBJECTS = mem_sim.o MAIN.o
 
 app: $(OBJECTS)
 	$(CC) $(OBJECTS) -Wall -o app
@@ -11,6 +11,6 @@ clean:
 mem_sim.o: mem_sim.c mem_sim.h
 	$(CC) $(CFLAGS) mem_sim.c mem_sim.h
 
-main.o: MAIN.c
+MAIN.o: MAIN.c
 	$(CC) $(CFLAGS) MAIN.c
 

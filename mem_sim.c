@@ -100,6 +100,9 @@ static void freeDb(sim_database_t*); //free memory
 static int freeFrame(sim_database_t*); //find free frame in RAM
 static void init_tempPage(); //initialize temp page to PAGE_SIZE zeroes (32)
 
+void printFrame(int); //DEBUG
+void printRAM(); //DEBUG
+
 /******************************************/
 /********** Main Program Methods **********/
 /******************************************/
@@ -175,23 +178,23 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   page = (address >> 5); //shift number 5 bits to get page number
   offset = (address & (PAGE_SIZE-1)); // mask 5 LSBs to get offset number 
   
+  printf("DEBUG - vm_load: numOfPages = %d, Address = %d, Page = %d, Offset = %d\n", numOfPages, address, page, offset); //DEBUG
+  
   //update counters
   count_memoryAccess++;
   global_counter++;
-  
-  //fprintf(stderr, "address = %d ,page = %d, numOfPages = %d \n", address, page, numOfPages); //debug
   
   //Check Address legality
   if(page >= numOfPages || page < 0) {
     count_illegalAddr++;
     
-    perror("ERROR: illegal address - page out of range\n");
+    perror("ERROR: illegal address - page out of range - DEBUG: vm_load\n");
     return -1;
   }
   else if(offset >= PAGE_SIZE || offset < 0) {
     count_illegalAddr++;
     
-    perror("ERROR: illegal address - offset out of range\n");
+    perror("ERROR: illegal address - offset out of range - DEBUG: vm_load\n");
     return -1;
   }
   
@@ -203,8 +206,11 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   if (sim_db->page_table[page].valid) { //!= 0 
     count_hits++;
     
+    printf("DEBUG: vm_load in RAM\n"); //DEBUG
+    
     frame = sim_db->page_table[page].frame;
     lru[frame] = global_counter;
+    printf("DEBUG: vm_load - lru[%d] = %d\n", frame, lru[frame]); //DEBUG
     p_char = &RAM[(frame * PAGE_SIZE) + offset];
     return 0;
   }
@@ -213,9 +219,11 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   else if (sim_db->page_table[page].permission) {
      count_miss++;
      
+     printf("DEBUG: vm_load in Exec\n"); //DEBUG
+     
      bytes = lseek(sim_db->executable_fd, (page * PAGE_SIZE), SEEK_SET);
      if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
-       perror("ERROR: vmload failed to access SWAP file\n");
+       perror("ERROR: vmload failed to access Exec file\n");
        return -1;
      }
       frame = freeFrame(sim_db);
@@ -224,9 +232,9 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
       return -1;
     }
     
-      bytes = read(sim_db->executable_fd, &RAM[frame], PAGE_SIZE);
+      bytes = read(sim_db->executable_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
       if(bytes < 0 || bytes != PAGE_SIZE) {
-	perror("ERROR: failed to read from SWAP file\n");
+	perror("ERROR: failed to read from Exec file\n");
 	return -1;
       }
   }
@@ -234,6 +242,8 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   //if in SWAP
   else if (sim_db->page_table[page].dirty) {
     count_miss++;
+    
+    printf("DEBUG: vm_load in SWAP\n"); //DEBUG
     
     bytes = lseek(sim_db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET);
     if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
@@ -246,9 +256,33 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
       return -1;
     }
     
-    bytes = read(sim_db->swapfile_fd, &RAM[frame], PAGE_SIZE);
+    bytes = read(sim_db->swapfile_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
     if(bytes < 0 || bytes != PAGE_SIZE) {
       perror("ERROR: failed to read from SWAP file\n");
+      return -1;
+    }
+  }
+  
+  //if in DATA/BSS
+  else if( page < exec_size ) {
+    count_miss++;
+    
+    printf("DEBUG: vm_load in DATA/BSS\n"); //DEBUG
+    
+    bytes = lseek(sim_db->executable_fd, (page * PAGE_SIZE), SEEK_SET);
+    if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
+      perror("ERROR: vmload failed to access Exec file\n");
+      return -1;
+    }
+    frame = freeFrame(sim_db);
+    if(frame < 0) {
+      perror("ERROR: failed to swap out frame\n");
+      return -1;
+    }
+    
+    bytes = read(sim_db->executable_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
+    if(bytes < 0 || bytes != PAGE_SIZE) {
+      perror("ERROR: failed to read from Exec file\n");
       return -1;
     }
   }
@@ -260,9 +294,15 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
     return -1;
   }
   
+  printf("DEBUG: vm_load - page is in Frame #%d\n", frame); //DEBUG
+  printf("DEBUG: vm_load - global counter = %d\n", global_counter); //DEBUG
+  
   p_char = &RAM[(frame * PAGE_SIZE) + offset];
   lru[frame] = global_counter;
+  printf("DEBUG: vm_load - lru[%d] = %d\n", frame, lru[frame]); //DEBUG
   lru_page[frame] = page;
+  bitmap[frame] = 1;
+  sim_db->page_table[page].valid = 1;
   sim_db->page_table[page].frame = frame;
   return 0;
 }
@@ -276,6 +316,8 @@ int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value
   int page, offset, frame;
   page = (address >> 5); //shift number 5 bits to get page number
   offset = (address & (PAGE_SIZE-1)); // mask 5 LSBs to get offset number 
+  
+  printf("DEBUG - vm_store: numOfPages = %d, Address = %d, Page = %d, Offset = %d\n", numOfPages, address, page, offset); //DEBUG
   
   //update counters
   count_memoryAccess++;
@@ -310,17 +352,23 @@ int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value
   if(sim_db->page_table[page].valid) {
     count_hits++;
     
+    printf("DEBUG: vm_store in RAM\n"); //DEBUG
+    
     frame = sim_db->page_table[page].frame;
     lru[frame] = global_counter;
-    lru_page[frame] = page;
+    printf("DEBUG: vm_store - lru[%d] = %d\n", frame, lru[frame]); //DEBUG
+    //lru_page[frame] = page;
+    //bitmap[frame] = 1;
     sim_db->page_table[page].dirty = 1;
-    RAM[(frame *  PAGE_SIZE) + offset] = value; //correct position?
+    RAM[(frame *  PAGE_SIZE) + offset] = value; //DEBUG correct position?
     return 0;
   }
   
   //if in SWAP
   else if (sim_db->page_table[page].dirty) {
     count_miss++;
+    
+    printf("DEBUG: vm_store in SWAP\n"); //DEBUG
     
     bytes = lseek(sim_db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET);
     if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
@@ -333,24 +381,19 @@ int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value
       return -1;
     }
     
-    bytes = read(sim_db->swapfile_fd, &RAM[frame], PAGE_SIZE);
+    bytes = read(sim_db->swapfile_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
     if(bytes < 0 || bytes != PAGE_SIZE) {
       perror("ERROR: failed to read from SWAP file\n");
       return -1;
     }
-    
-    sim_db->page_table[page].frame = frame;
-    lru[frame] = global_counter;
-    lru_page[frame] = page;
-    sim_db->page_table[page].dirty = 1;
-    RAM[(frame * PAGE_SIZE) + offset] = value;
-    return 0;
     
   }
   
   //if in DATA/BSS
   else if (!sim_db->page_table[page].permission && page < exec_size) {
     count_miss++;
+    
+    printf("DEBUG: vm_store in DATA/BSS\n"); //DEBUG
     
     bytes = lseek(sim_db->executable_fd, (page * PAGE_SIZE), SEEK_SET);
     if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
@@ -363,19 +406,12 @@ int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value
       return -1;
     }
     
-    bytes = read(sim_db->executable_fd, &RAM[frame], PAGE_SIZE);
+    bytes = read(sim_db->executable_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
     if(bytes < 0 || bytes != PAGE_SIZE) {
       perror("ERROR: failed to read from DATA/BSS file\n");
       return -1;
     }
     
-    
-    sim_db->page_table[page].frame = frame;
-    lru[frame] = global_counter;
-    lru_page[frame] = page;
-    sim_db->page_table[page].dirty = 1;
-    RAM[(frame * PAGE_SIZE) + offset] = value;
-    return 0;
   }
   
   
@@ -383,31 +419,32 @@ int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value
   else {
     count_miss++;
     
+    printf("DEBUG: vm_store in NEW PAGE\n"); //DEBUG
+    
     init_tempPage();
     frame = freeFrame(sim_db);
     if(frame < 0) {
       perror("ERROR: failed to swap out frame\n"); //DEBUG - might be redundant - freeFrame method prints errors
       return -1;
     }
-    strcpy(&RAM[frame], temp_page); //safe to use, since RAM size is bigger than temp_page, else use strncpy
-    
-    sim_db->page_table[page].frame = frame;
-    lru[frame] = global_counter;
-    lru_page[frame] = page;
-    sim_db->page_table[page].dirty = 1;
-    RAM[(frame * PAGE_SIZE) + offset] = value;
-    return 0;
+    strcpy(&RAM[frame * PAGE_SIZE], temp_page); //DEBUG testing strncpy//safe to use, since RAM size is bigger than temp_page, else use strncpy
+    printFrame(frame); //DEBUG
   }
   
+  printf("DEBUG: vm_store - page is in Frame #%d\n", frame); //DEBUG
+  printf("DEBUG: vm_store - global counter = %d\n", global_counter); //DEBUG
   
-  
-  
-  /*** Solution ***/
-  // RAM is char* - static char RAM[MEMORY_SIZE];
-  // used &RAM[frame] to read()\write() from\to SWAP
-  /*************************/
-  
-  return -1; 
+  sim_db->page_table[page].frame = frame;
+  lru[frame] = global_counter;
+  printf("DEBUG: vm_store - lru[%d] = %d\n", frame, lru[frame]); //DEBUG
+  lru_page[frame] = page;
+  bitmap[frame] = 1;
+  sim_db->page_table[page].dirty = 1;
+  sim_db->page_table[page].valid = 1;
+  printf("DEBUG: value = %c\n", value); //DEBUG
+  RAM[(frame * PAGE_SIZE) + offset] = value;
+  printFrame(frame); //DEBUG
+  return 0; 
 }
 /********************** vm_store END ***************************/
 
@@ -448,12 +485,12 @@ void vm_print(sim_database_t* sim_db) {
   printf("Executable File name = %s\n", sim_db->executable_name);
   
   printf("*** Printing RAM ***\n");
-  for(i=0; i < MEMORY_SIZE; i++)
+  for(i=0; i < MEMORY_SIZE; i++) {
     if(!(i % PAGE_SIZE) && i)
       printf("\n");
     printf("%c", RAM[i]);
-  
-  printf("*** Printing Statistics ***\n");
+  }
+  printf("\n*** Printing Statistics ***\n");
   printf("Memory Access = %d, Hits = %d, Miss = %d\n", 
 	 count_memoryAccess, count_hits, count_miss);
   printf("Illegal Address = %d, Write to READ-ONLY = %d\n", 
@@ -504,12 +541,16 @@ static int freeFrame(sim_database_t *db) {
       perror("ERROR: Swapping frame failed - lseek failed\n");
       return -1;
     }
-    bytes = write(db->swapfile_fd, &RAM[frame], PAGE_SIZE);
+    bytes = write(db->swapfile_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
     if(bytes < 0 || bytes != PAGE_SIZE) {
       perror("ERROR: Swapping frame failed - writing to swap failed\n");
       return -1;
     }
   }
+  
+  db->page_table[page].valid = 0;
+  db->page_table[page].frame = -1;
+  bitmap[frame] = 0; //DEBUG test - might be useless
   
   return frame;
 }
@@ -522,4 +563,28 @@ static void init_tempPage() {
   }
 }
 
+/****************************************************/
+/*************** DEBUG Methods  *********************/ //DELETE WHEN DONE
+/****************************************************/
+
+void printFrame(int frame) {
+  int i;
+  
+  printf("*** Printing Frame #%d ***\n", frame);
+  for(i=(frame * PAGE_SIZE); i <( (frame * PAGE_SIZE) + PAGE_SIZE); i++)
+    printf("%c", RAM[i]);
+  
+  printf("\n");
+}
+
+void printRAM() {
+  int i;
+  
+  printf("*** Printing RAM ***\n");
+  for(i=0; i < MEMORY_SIZE; i++) {
+    if(!(i % PAGE_SIZE) && i)
+      printf(" - Frame #%d, lru = %d\n", (i/PAGE_SIZE) - 1, lru[(i / PAGE_SIZE) - 1]);
+    printf("%c", RAM[i]);
+  }
+}
 
