@@ -630,9 +630,10 @@ void printRAM() {
   
   printf("*** Printing RAM ***\n");
   for(i=0; i < MEMORY_SIZE; i++) {
-    if(!(i % PAGE_SIZE) && i)
-      printf(" - Frame #%d, lru = %d\n", (i/PAGE_SIZE) - 1, lru[(i / PAGE_SIZE) - 1]);
+    if(!(i % PAGE_SIZE))
+      printf("\nlru = %d - frame #%d: ", lru[i/PAGE_SIZE], i/PAGE_SIZE);
     printf("%c", RAM[i]);
   }
+  printf("\n");
 }
 
