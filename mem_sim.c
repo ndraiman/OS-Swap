@@ -98,6 +98,7 @@ LRU - counter Implementation - save counter for each page
 /**************************************************/
 static void freeDb(sim_database_t*); //free memory
 static int freeFrame(sim_database_t*); //find free frame in RAM
+static int swap(sim_database_t*, int); //swap out frame with smallest LRU counter
 static void init_tempPage(); //initialize temp page to PAGE_SIZE zeroes (32)
 
 void printFrame(int); //DEBUG
@@ -161,6 +162,7 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
   for(i=0; i < FRAME_NUM; i++) {
     bitmap[i] = 0;
     lru[i] = 0;
+    lru_page[i] = 0;
   }
   
   exec_size = text_size + bss_size + data_size; //assign global variable - size in pages
@@ -360,7 +362,7 @@ int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value
     //lru_page[frame] = page;
     //bitmap[frame] = 1;
     sim_db->page_table[page].dirty = 1;
-    RAM[(frame *  PAGE_SIZE) + offset] = value; //DEBUG correct position?
+    RAM[(frame *  PAGE_SIZE) + offset] = value; //DEBUG - correct position?
     return 0;
   }
   
@@ -427,18 +429,20 @@ int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value
       perror("ERROR: failed to swap out frame\n"); //DEBUG - might be redundant - freeFrame method prints errors
       return -1;
     }
-    strcpy(&RAM[frame * PAGE_SIZE], temp_page); //DEBUG testing strncpy//safe to use, since RAM size is bigger than temp_page, else use strncpy
+    //strcpy(&RAM[frame * PAGE_SIZE], temp_page); //DEBUG testing strncpy//safe to use, since RAM size is bigger than temp_page, else use strncpy
+    strncpy(&RAM[frame * PAGE_SIZE], temp_page, PAGE_SIZE);
     printFrame(frame); //DEBUG
   }
   
   printf("DEBUG: vm_store - page is in Frame #%d\n", frame); //DEBUG
   printf("DEBUG: vm_store - global counter = %d\n", global_counter); //DEBUG
   
-  sim_db->page_table[page].frame = frame;
+  
   lru[frame] = global_counter;
   printf("DEBUG: vm_store - lru[%d] = %d\n", frame, lru[frame]); //DEBUG
   lru_page[frame] = page;
   bitmap[frame] = 1;
+  sim_db->page_table[page].frame = frame;
   sim_db->page_table[page].dirty = 1;
   sim_db->page_table[page].valid = 1;
   printf("DEBUG: value = %c\n", value); //DEBUG
@@ -486,8 +490,8 @@ void vm_print(sim_database_t* sim_db) {
   
   printf("*** Printing RAM ***\n");
   for(i=0; i < MEMORY_SIZE; i++) {
-    if(!(i % PAGE_SIZE) && i)
-      printf("\n");
+    if(!(i % PAGE_SIZE))
+      printf("\nframe #%d: ", i/PAGE_SIZE);
     printf("%c", RAM[i]);
   }
   printf("\n*** Printing Statistics ***\n");
@@ -525,7 +529,15 @@ static int freeFrame(sim_database_t *db) {
       min_lru = i;
     } 
   }
-
+  
+  if(swap(db,min_lru)) {
+    perror("ERROR: swap() failed\n");
+    return -1;
+  }
+  
+  return min_lru;
+  
+  /*
   //if reached here, means we have to SWAP-OUT frame at min_lru_index
   page = lru_page[min_lru];
   frame = db->page_table[page].frame;
@@ -552,7 +564,43 @@ static int freeFrame(sim_database_t *db) {
   db->page_table[page].frame = -1;
   bitmap[frame] = 0; //DEBUG test - might be useless
   
-  return frame;
+  return frame;*/
+}
+
+static int swap(sim_database_t* db, int frame) {
+  int i, page, bytes;
+  
+  page = lru_page[frame];
+  
+  //if not valid - error!
+  if(!db->page_table[page].valid) {
+    perror("ERROR: trying to swap out a non-valid page\n");
+    return -1;
+  }
+  //if read-only - no need to swap
+  else if(db->page_table[page].permission)
+    return 0;
+  //if dirty - in swap
+  else if(db->page_table[page].dirty) {
+    bytes = lseek(db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET); 
+    if(bytes != (page * PAGE_SIZE)) {
+      perror("ERROR: Swapping frame failed - lseek failed\n");
+      printf("bytes = %d \n", bytes); //DEBUG
+      return -1;
+    }
+    bytes = write(db->swapfile_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
+    if(bytes != PAGE_SIZE) {
+      perror("ERROR: Swapping frame failed - writing to swap failed\n");
+      printf("bytes = %d \n", bytes); //DEBUG
+      return -1;
+    }
+  }
+  
+  db->page_table[page].valid = 0;
+  db->page_table[page].frame = -1;
+  bitmap[frame] = 0;
+  
+  return 0;
 }
 
 //initialize temp page to PAGE_SIZE zeroes (32)
