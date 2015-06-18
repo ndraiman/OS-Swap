@@ -497,7 +497,7 @@ static int swap(sim_database_t* db, int frame) {
     return -1;
   }
   
-  //if dirty - in swap
+  //if dirty - in SWAP
   else if (db->page_table[page].dirty) {
     //Write with offset
     bytes = pwrite(db->swapfile_fd, &RAM[frame * PAGE_SIZE], 
@@ -508,7 +508,7 @@ static int swap(sim_database_t* db, int frame) {
     }
   }
   
-  //else read-only - no need to swap out
+  //else in Exec - no need to swap out
   
   //Update page table
   db->page_table[page].valid = 0;
