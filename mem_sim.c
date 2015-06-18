@@ -56,17 +56,17 @@ int exec_size; // save file size - used to determine beginning of heap\stack in 
 
 static char RAM[MEMORY_SIZE]; //RAM - each 32 Bytes is a frame. total: 16 frames
 int bitmap[FRAME_NUM]; //array to determine if RAM frame is occupied - 1 = occupied, 0 = free.
-int lru[FRAME_NUM]; //holds global counter for each page loaded in RAM
-int lru_page[FRAME_NUM]; //holds page number for each page loaded in RAM
 
 char temp_page[PAGE_SIZE]; //temp page for swapping
 
 int global_counter=0; //used for LRU
+int lru[FRAME_NUM]; //holds global counter for each page loaded in RAM
+int lru_page[FRAME_NUM]; //holds page number for each page loaded in RAM
 
 //Statistics Variables
 int count_memoryAccess=0; //# of times vmload  & vmstore got called
 int count_hits = 0; //# of access to pages already in memory
-int count_miss = 0; //# of pagefaults - access to pages no in memory
+int count_miss = 0; //# of pagefaults - access to pages not in memory
 int count_illegalAddr = 0; //# of illegal addresses
 int count_read_only_err = 0; //# of writing attempts to a read-only section
 
@@ -98,7 +98,7 @@ LRU - counter Implementation - save counter for each page
 /**************************************************/
 static void freeDb(sim_database_t*); //free memory
 static int freeFrame(sim_database_t*); //find free frame in RAM
-static int swap(sim_database_t*, int); //swap out frame with smallest LRU counter
+static int swap(sim_database_t*, int); //Swap out frame out of RAM.
 static void init_tempPage(); //initialize temp page to PAGE_SIZE zeroes (32)
 
 void printFrame(int); //DEBUG
@@ -116,6 +116,7 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
   if(executable == NULL)
     return NULL;
   
+  //Init database
   sim_database_t* db = (sim_database_t*)malloc(sizeof(sim_database_t));
   if(db == NULL) {
     perror("ERROR: failed to allocate memory for sim_database\n");
@@ -129,19 +130,28 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
     return NULL;
   }
   
+  //open executable and swap files
   db->executable_name = executable;
-  if( (db->executable_fd = open(db->executable_name, O_RDONLY, 7777)) < 0) {
+  if( (db->executable_fd = open(db->executable_name, O_RDONLY, 0777)) < 0) {
     perror("ERROR: failed to open executable\n");
     free(db->page_table);
     free(db);
     return NULL;
   }
-
   
+  db->swapfile_name = "swapfile.txt";
+  if( (db->swapfile_fd = open(db->swapfile_name, O_RDWR | O_CREAT | O_TRUNC, 0777)) < 0) {
+    perror("ERROR: failed to create swap file\n");
+    free(db->page_table);
+    free(db);
+    return NULL;
+  }
+
+  //Setup Page Table
   int i;
   for(i=0; i < numOfPages; i++) {
     if(i < text_size)
-      db->page_table[i].permission = 1; //READ ONLY
+      db->page_table[i].permission = 1; //READ ONLY - Executable text segment
     else
       db->page_table[i].permission = 0; //READ & WRITE
       
@@ -151,27 +161,20 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size, i
     
   }
   
-  db->swapfile_name = "swapfile.txt";
-  if( (db->swapfile_fd = open(db->swapfile_name, O_RDWR | O_CREAT | O_TRUNC, 7777)) < 0) {
-    perror("ERROR: failed to create swap file\n");
-    free(db->page_table);
-    free(db);
-    return NULL;
-  }
-  
+  //Init LRU and Memory arrays
   for(i=0; i < FRAME_NUM; i++) {
     bitmap[i] = 0;
     lru[i] = 0;
     lru_page[i] = 0;
   }
   
-  /*for(i=0; i < MEMORY_SIZE; i++) {
+  for(i=0; i < MEMORY_SIZE; i++) {
     RAM[i] = 0;
   }
   
-  printRAM(); //DEBUG*/
+//   printRAM(); //DEBUG
   
-  exec_size = text_size + bss_size + data_size; //assign global variable - size in pages
+  exec_size = text_size + bss_size + data_size; //size in pages
   
   return db;
 }
@@ -196,13 +199,13 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   if(page >= numOfPages || page < 0) {
     count_illegalAddr++;
     
-    //perror("ERROR: illegal address - page out of range - DEBUG: vm_load\n");
+    perror("ERROR: illegal address - page out of range - DEBUG: vm_load\n");
     return -1;
   }
   else if(offset >= PAGE_SIZE || offset < 0) {
     count_illegalAddr++;
     
-    //perror("ERROR: illegal address - offset out of range - DEBUG: vm_load\n");
+    perror("ERROR: illegal address - offset out of range - DEBUG: vm_load\n");
     return -1;
   }
   
@@ -220,7 +223,6 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
     lru[frame] = global_counter;
     printf("DEBUG: vm_load - lru[%d] = %d\n", frame, lru[frame]); //DEBUG
     *p_char = RAM[(frame * PAGE_SIZE) + offset];
-    //strncpy(p_char, &RAM[(frame * PAGE_SIZE) + offset], 1);
     return 0;
   }
   
@@ -259,7 +261,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
       perror("ERROR: vmload failed to access SWAP file\n");
       return -1;
     }
-    frame = freeFrame(sim_db);
+    frame = freeFrame(sim_db); //get Free frame in RAM
     if(frame < 0) {
       perror("ERROR: failed to swap out frame\n");
       return -1;
@@ -307,7 +309,6 @@ int vm_load(sim_database_t *sim_db, unsigned short address, unsigned char *p_cha
   printf("DEBUG: vm_load - global counter = %d\n", global_counter); //DEBUG
   
   *p_char = RAM[(frame * PAGE_SIZE) + offset];
-  //strncpy(p_char, &RAM[(frame * PAGE_SIZE) + offset], 1);
   
   printf("p_char = %s\n", p_char); //DEBUG
   printf("RAM[(frame * PAGE_SIZE) + offset] = %c\n", RAM[(frame * PAGE_SIZE) + offset]); //DEBUG
@@ -371,8 +372,6 @@ int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value
     frame = sim_db->page_table[page].frame;
     lru[frame] = global_counter;
     printf("DEBUG: vm_store - lru[%d] = %d\n", frame, lru[frame]); //DEBUG
-    //lru_page[frame] = page;
-    //bitmap[frame] = 1;
     sim_db->page_table[page].dirty = 1;
     RAM[(frame *  PAGE_SIZE) + offset] = value; //DEBUG - correct position?
     return 0;
@@ -428,20 +427,18 @@ int vm_store(sim_database_t *sim_db, unsigned short address, unsigned char value
     
   }
   
-  
   //else init new page
   else {
     count_miss++;
     
     printf("DEBUG: vm_store in NEW PAGE\n"); //DEBUG
     
-    init_tempPage();
+    init_tempPage(); //reset Temp Page
     frame = freeFrame(sim_db);
     if(frame < 0) {
-      perror("ERROR: failed to swap out frame\n"); //DEBUG - might be redundant - freeFrame method prints errors
+      perror("ERROR: failed to swap out frame\n");
       return -1;
     }
-    //strcpy(&RAM[frame * PAGE_SIZE], temp_page); //DEBUG testing strncpy//safe to use, since RAM size is bigger than temp_page, else use strncpy
     strncpy(&RAM[frame * PAGE_SIZE], temp_page, PAGE_SIZE);
     printf("** Frame New PAGE:\n"); //DEBUG
     printFrame(frame); //DEBUG
@@ -526,6 +523,8 @@ static void freeDb(sim_database_t *db) {
   free(db->page_table);
   free(db);
 }
+/****************************************/
+/****************************************/
 
 //Finds free Frame in RAM or frees an old one
 //return value: on sucess - frame #, on failure returns -1
@@ -545,42 +544,15 @@ static int freeFrame(sim_database_t *db) {
   }
   
   if(swap(db,min_lru)) {
-    perror("ERROR: swap() failed\n");
     return -1;
   }
   
   return min_lru;
-  
-  /*
-  //if reached here, means we have to SWAP-OUT frame at min_lru_index
-  page = lru_page[min_lru];
-  frame = db->page_table[page].frame;
-  
-  //page is READ-ONLY, no need to write into SWAP.
-  if(db->page_table[page].permission)
-    return frame;
-  
-  //page is dirty - Write page into SWAP
-  else if(db->page_table[page].dirty) {
-    bytes = lseek(db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET);
-    if(bytes < 0 || bytes != PAGE_SIZE) {
-      perror("ERROR: Swapping frame failed - lseek failed\n");
-      return -1;
-    }
-    bytes = write(db->swapfile_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
-    if(bytes < 0 || bytes != PAGE_SIZE) {
-      perror("ERROR: Swapping frame failed - writing to swap failed\n");
-      return -1;
-    }
-  }
-  
-  db->page_table[page].valid = 0;
-  db->page_table[page].frame = -1;
-  bitmap[frame] = 0; //DEBUG test - might be useless
-  
-  return frame;*/
 }
+/****************************************/
+/****************************************/
 
+//Swap out frame out of RAM.
 static int swap(sim_database_t* db, int frame) {
   int i, page, bytes;
   
@@ -591,21 +563,14 @@ static int swap(sim_database_t* db, int frame) {
     perror("ERROR: trying to swap out a non-valid page\n");
     return -1;
   }
+  
   //if read-only - no need to swap
-  else if(db->page_table[page].permission)
+  else if (db->page_table[page].permission)
     return 0;
+  
   //if dirty - in swap
-  else if(db->page_table[page].dirty) {
-    /*bytes = lseek(db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET); 
-    if(bytes != (page * PAGE_SIZE)) {
-      perror("ERROR: Swapping frame failed - lseek failed\n");
-      printf("bytes = %d \n", bytes); //DEBUG
-      return -1;
-    }
-    
-    printf("****** LSEEK, page = %d, bytes = %d, offset = %d\n", page, bytes, page*PAGE_SIZE); //DEBUG
-    
-    bytes = write(db->swapfile_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);*/
+  else if (db->page_table[page].dirty) {
+    //Write with offset
     bytes = pwrite(db->swapfile_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE, (page * PAGE_SIZE));
     if(bytes != PAGE_SIZE) {
       perror("ERROR: Swapping frame failed - writing to swap failed\n");
@@ -624,6 +589,8 @@ static int swap(sim_database_t* db, int frame) {
   
   return 0;
 }
+/****************************************/
+/****************************************/
 
 //initialize temp page to PAGE_SIZE zeroes (32)
 static void init_tempPage() {
@@ -632,6 +599,10 @@ static void init_tempPage() {
     temp_page[i] = '0';
   }
 }
+
+/****************************************************/
+/****************************************************/
+/****************************************************/
 
 /****************************************************/
 /*************** DEBUG Methods  *********************/ //DELETE WHEN DONE
