@@ -12,7 +12,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <malloc.h>
-#include "mem_sim.h" 
+#include "mem_sim.h"
 
 #define ACCESS 2000
 #define MISS -1
@@ -25,7 +25,7 @@ int main ()
 {
   char file[ 30 ] = "program_file" ;
   int seed = 0 , text = 0 , data = 0  , bss = 0 , fd = 0 ;
-  unsigned char value = 4          ;
+  unsigned char value = '4'          ;
   unsigned counter = 0             ;
   unsigned short addr = 0          ;
   int miss = 0, hit = 0            ;
@@ -41,6 +41,14 @@ int main ()
 
   for ( counter = 0 ; counter < ACCESS  ; counter++ )
     {
+      //DEBUG
+      if(!(counter%100)) {
+	//char t;	
+	printRAM(); 
+	printf("MAIN: value = %c\n", value);
+	//scanf("%c", &t);
+      }
+      /*****************/
       int s ; 
       addr = rand ()  ;
       if ( ( s = vm_load( vir_mem, addr, &value ) ) == MISS )
