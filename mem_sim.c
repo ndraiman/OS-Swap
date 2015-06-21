@@ -165,6 +165,9 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size,
 int vm_load(sim_database_t *sim_db, unsigned short address, 
 	    unsigned char *p_char) {
   
+  if(sim_db == NULL || p_char == NULL)
+    return -1;
+  
   int page, offset, frame;
   page = (address >> 5); //shift number 5 bits to get page number
   offset = (address & (PAGE_SIZE-1)); // mask 5 LSBs to get offset number 
@@ -273,6 +276,9 @@ int vm_load(sim_database_t *sim_db, unsigned short address,
 
 int vm_store(sim_database_t *sim_db, unsigned short address, 
 	     unsigned char value) {
+  
+  if(sim_db == NULL)
+    return -1;
   
   int page, offset, frame;
   page = (address >> 5); //shift number 5 bits to get page number
