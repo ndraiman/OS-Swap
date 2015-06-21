@@ -206,7 +206,6 @@ int vm_load(sim_database_t *sim_db, unsigned short address,
   
   //if in SWAP
   else if (sim_db->page_table[page].dirty) {
-    count_miss++;
     
     //Position file offset to Page position
     bytes = lseek(sim_db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET);
@@ -230,7 +229,6 @@ int vm_load(sim_database_t *sim_db, unsigned short address,
   
   //if in DATA/BSS
   else if( page < exec_size ) {
-    count_miss++;
     
     bytes = lseek(sim_db->executable_fd, (page * PAGE_SIZE), SEEK_SET);
     if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
@@ -256,6 +254,8 @@ int vm_load(sim_database_t *sim_db, unsigned short address,
     perror("ERROR: Page not Initialized\n");
     return -1;
   }
+  
+  count_miss++;
   
   *p_char = RAM[(frame * PAGE_SIZE) + offset];
   
@@ -328,7 +328,6 @@ int vm_store(sim_database_t *sim_db, unsigned short address,
   
   //if in SWAP
   else if (sim_db->page_table[page].dirty) {
-    count_miss++;
     
     bytes = lseek(sim_db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET);
     if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
@@ -351,7 +350,6 @@ int vm_store(sim_database_t *sim_db, unsigned short address,
   
   //if in DATA/BSS
   else if (!sim_db->page_table[page].permission && page < exec_size) {
-    count_miss++;
     
     bytes = lseek(sim_db->executable_fd, (page * PAGE_SIZE), SEEK_SET);
     if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
@@ -374,7 +372,6 @@ int vm_store(sim_database_t *sim_db, unsigned short address,
   
   //else init new page
   else {
-    count_miss++;
     
     init_tempPage(); //reset Temp Page
     frame = freeFrame(sim_db);
@@ -386,6 +383,7 @@ int vm_store(sim_database_t *sim_db, unsigned short address,
     strncpy(&RAM[frame * PAGE_SIZE], temp_page, PAGE_SIZE);
   }
   
+  count_miss++;
   
   lru[frame] = global_counter;
   lru_page[frame] = page;
