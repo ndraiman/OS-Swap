@@ -149,7 +149,7 @@ sim_database_t* vm_constructor(char *executable, int text_size, int data_size,
   }
   
   for(i=0; i < MEMORY_SIZE; i++) {
-    RAM[i] = 0;
+    RAM[i] = '0';
   }
   
   exec_size = text_size + bss_size + data_size; //size in pages
