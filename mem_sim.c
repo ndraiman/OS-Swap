@@ -209,7 +209,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address,
     
     //Position file offset to Page position
     bytes = lseek(sim_db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET);
-    if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
+    if(bytes != (page * PAGE_SIZE)) {
       perror("ERROR: vmload failed to access SWAP file\n");
       return -1;
     }
@@ -221,7 +221,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address,
     
     //Read Page
     bytes = read(sim_db->swapfile_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
-    if(bytes < 0 || bytes != PAGE_SIZE) {
+    if(bytes != PAGE_SIZE) {
       perror("ERROR: failed to read from SWAP file\n");
       return -1;
     }
@@ -231,7 +231,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address,
   else if( page < exec_size ) {
     
     bytes = lseek(sim_db->executable_fd, (page * PAGE_SIZE), SEEK_SET);
-    if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
+    if(bytes != (page * PAGE_SIZE)) {
       perror("ERROR: vmload failed to access Exec file\n");
       return -1;
     }
@@ -242,7 +242,7 @@ int vm_load(sim_database_t *sim_db, unsigned short address,
     }
     
     bytes = read(sim_db->executable_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
-    if(bytes < 0 || bytes != PAGE_SIZE) {
+    if(bytes != PAGE_SIZE) {
       perror("ERROR: failed to read from Exec file\n");
       return -1;
     }
@@ -330,7 +330,7 @@ int vm_store(sim_database_t *sim_db, unsigned short address,
   else if (sim_db->page_table[page].dirty) {
     
     bytes = lseek(sim_db->swapfile_fd, (page * PAGE_SIZE), SEEK_SET);
-    if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
+    if(bytes != (page * PAGE_SIZE)) {
       perror("ERROR: vmload failed to access SWAP file\n");
       return -1;
     }
@@ -341,7 +341,7 @@ int vm_store(sim_database_t *sim_db, unsigned short address,
     }
     
     bytes = read(sim_db->swapfile_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
-    if(bytes < 0 || bytes != PAGE_SIZE) {
+    if(bytes != PAGE_SIZE) {
       perror("ERROR: failed to read from SWAP file\n");
       return -1;
     }
@@ -352,7 +352,7 @@ int vm_store(sim_database_t *sim_db, unsigned short address,
   else if (!sim_db->page_table[page].permission && page < exec_size) {
     
     bytes = lseek(sim_db->executable_fd, (page * PAGE_SIZE), SEEK_SET);
-    if(bytes < 0 || bytes != (page * PAGE_SIZE)) {
+    if(bytes != (page * PAGE_SIZE)) {
       perror("ERROR: vmload failed to access DATA/BSS file\n");
       return -1;
      }
@@ -363,7 +363,7 @@ int vm_store(sim_database_t *sim_db, unsigned short address,
     }
     
     bytes = read(sim_db->executable_fd, &RAM[frame * PAGE_SIZE], PAGE_SIZE);
-    if(bytes < 0 || bytes != PAGE_SIZE) {
+    if(bytes != PAGE_SIZE) {
       perror("ERROR: failed to read from DATA/BSS file\n");
       return -1;
     }
